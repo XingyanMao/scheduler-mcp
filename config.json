@@ -1,0 +1,14 @@
+{
+  "server": {
+      "name": "mcp-scheduler",
+      "version": "0.1.0",
+      "address": "localhost",
+      "port": 8080,
+      "transport": "stdio"
+  },
+  "ai": {
+      "model": "deepseek-chat",
+      "openai_api_key": "sk-7ecf73fa87c34475a3a6c1c2615b28c9",
+      "base_url": "https://api.deepseek.com/v1"
+  }
+}

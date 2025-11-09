@@ -10,6 +10,7 @@ import sys
 import traceback
 import threading
 import json
+import re
 
 from mcp_scheduler.config import Config
 from mcp_scheduler.persistence import Database
@@ -71,6 +72,29 @@ def handle_sigterm(signum, frame):
             log_to_stderr(f"Error during shutdown: {e}")
     sys.exit(0)
 
+# Custom stdout wrapper to ensure only JSON goes to stdout
+class JSONRPCStdout:
+    def __init__(self, original_stdout):
+        self.original_stdout = original_stdout
+        
+    def write(self, data):
+        # Only allow JSON data through stdout for MCP protocol
+        if data and data.strip():
+            # Check if it looks like JSON (starts with { or [)
+            if data.strip().startswith('{') or data.strip().startswith('['):
+                self.original_stdout.write(data)
+                self.original_stdout.flush()
+            else:
+                # Non-JSON data should go to stderr
+                sys.stderr.write(f"Attempted to write non-JSON to stdout: {data[:100]}\n")
+                sys.stderr.flush()
+        
+    def flush(self):
+        self.original_stdout.flush()
+        
+    def __getattr__(self, name):
+        return getattr(self.original_stdout, name)
+
 # Custom input wrapper to handle malformed JSON
 class SafeJsonStdin:
     def __init__(self, original_stdin):
@@ -81,18 +105,28 @@ class SafeJsonStdin:
         if not line:
             return line
             
+        # Skip obvious non-JSON lines (file paths, Python code, etc.)
+        stripped_line = line.strip()
+        if (stripped_line.startswith('D:/') or 
+            stripped_line.startswith('C:/') or 
+            stripped_line.startswith('/') or
+            '.py' in stripped_line or
+            '.venv' in stripped_line or
+            (not stripped_line.startswith('{') and not stripped_line.startswith('['))):
+            log_to_stderr(f"Skipping non-JSON input: {stripped_line[:100]}...")
+            return '\n'  # Return empty line to avoid blocking
+            
         # Only try to fix lines that look like JSON
-        if line.strip().startswith('{') or line.strip().startswith('['):
+        if stripped_line.startswith('{') or stripped_line.startswith('['):
             try:
                 # Parse the JSON to ensure it's valid
-                json_obj = json.loads(line)
+                json.loads(stripped_line)
                 return line
             except json.JSONDecodeError as e:
                 log_to_stderr(f"Fixing malformed JSON input: {e}")
                 # Try to extract the ID if present
                 try:
-                    import re
-                    id_match = re.search(r'"id"\s*:\s*(\d+)', line)
+                    id_match = re.search(r'"id"\s*:\s*(\d+)', stripped_line)
                     if id_match:
                         id_val = id_match.group(1)
                         return f'{{"jsonrpc":"2.0","id":{id_val},"error":{{"code":-32700,"message":"Parse error"}}}}\n'
@@ -118,6 +152,10 @@ def start_well_known_server():
 
 def main():
     """Main entry point."""
+    # Save original stdout for JSON-RPC communication
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    
     parser = argparse.ArgumentParser(description="MCP Scheduler Server")
     parser.add_argument(
         "--address", 
@@ -176,10 +214,35 @@ def main():
         action="store_true",
         help="Enable JSON fixing for malformed messages"
     )
+    parser.add_argument(
+        "--ai-provider", 
+        default=None,
+        choices=["openai", "azure", "anthropic", "local"],
+        help="AI provider (openai, azure, anthropic, local) (default: openai)"
+    )
+    parser.add_argument(
+        "--openai-base-url", 
+        default=None,
+        help="OpenAI compatible API base URL (default: https://api.openai.com/v1)"
+    )
+    parser.add_argument(
+        "--openai-api-key", 
+        default=None,
+        help="OpenAI compatible API key"
+    )
     
     args = parser.parse_args()
     
     # Set environment variables for config
+    if args.ai_provider:
+        os.environ["MCP_SCHEDULER_AI_PROVIDER"] = args.ai_provider
+
+    if args.openai_base_url:
+        os.environ["MCP_SCHEDULER_OPENAI_BASE_URL"] = args.openai_base_url
+
+    if args.openai_api_key:
+        os.environ["MCP_SCHEDULER_OPENAI_API_KEY"] = args.openai_api_key
+
     if args.config:
         os.environ["MCP_SCHEDULER_CONFIG_FILE"] = args.config
     
@@ -211,6 +274,11 @@ def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
     
     try:
+        # Apply stdout wrapper for stdio transport to ensure only JSON goes to stdout
+        if args.transport == "stdio" or (not args.transport and os.getenv("MCP_SCHEDULER_TRANSPORT", "stdio") == "stdio"):
+            log_to_stderr("Using stdio transport - applying stdout wrapper")
+            sys.stdout = JSONRPCStdout(original_stdout)
+        
         # Install JSON fixing patches if requested or always in debug mode
         if args.fix_json or debug_mode:
             # Try to patch the FastMCP parser directly
@@ -236,10 +304,12 @@ def main():
             
         setup_logging(config.log_level, config.log_file)
         
+        # Print configuration for debugging
+        log_to_stderr(f"Configuration: AI Provider={config.ai_provider}, Model={config.ai_model}, Transport={config.transport}")
+        
         # Initialize components
         database = Database(config.db_path)
-        executor = Executor(config.openai_api_key, config.ai_model)
-        executor.execution_timeout = config.execution_timeout
+        executor = Executor(config)
         
         global scheduler
         scheduler = Scheduler(database, executor)
@@ -254,9 +324,9 @@ def main():
             daemon=True  # Make thread a daemon so it exits when the main thread exits
         )
         scheduler_thread.start()
-        log_to_stderr(f"Scheduler started in background thread")
+        log_to_stderr("Scheduler started in background thread")
 
-        # Si el transporte es SSE, lanza el servidor well-known en un thread aparte
+        # If transport is SSE, start well-known server in separate thread
         if config.transport == "sse":
             log_to_stderr(f"Starting well-known server on port {config.server_port + 1}")
             threading.Thread(target=start_well_known_server, daemon=True).start()
@@ -278,6 +348,10 @@ def main():
         if debug_mode:
             traceback.print_exc(file=sys.stderr)
         sys.exit(1)
+    finally:
+        # Restore original stdout/stderr
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
 
 if __name__ == "__main__":
     main()

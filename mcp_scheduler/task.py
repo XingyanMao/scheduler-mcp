@@ -26,14 +26,7 @@ class TaskType(str, Enum):
     SHELL_COMMAND = "shell_command"
     API_CALL = "api_call"
     AI = "ai"
-    REMINDER = "reminder"  # New task type for reminders
-
-
-def sanitize_ascii(text: str) -> str:
-    """Strips non-ASCII characters from a string."""
-    if not text:
-        return text
-    return re.sub(r'[^\x00-\x7F]+', '', text)
+    REMINDER = "reminder"
 
 
 class Task(BaseModel):
@@ -50,7 +43,7 @@ class Task(BaseModel):
     prompt: Optional[str] = None
     description: Optional[str] = None
     enabled: bool = True
-    do_only_once: bool = True  # New field: Default to run only once
+    do_only_once: bool = True
     last_run: Optional[datetime] = None
     next_run: Optional[datetime] = None
     status: TaskStatus = TaskStatus.PENDING
@@ -59,14 +52,7 @@ class Task(BaseModel):
     # Reminder-specific fields
     reminder_title: Optional[str] = None
     reminder_message: Optional[str] = None
-
-    @validator("name", "command", "prompt", "description", "reminder_title", "reminder_message", pre=True)
-    def validate_ascii_fields(cls, v):
-        """Ensure all user-visible text fields contain only ASCII characters."""
-        if isinstance(v, str):
-            return sanitize_ascii(v)
-        return v
-
+    
     @validator("command")
     def validate_command(cls, v, values):
         """Validate that a command is provided for shell_command tasks."""
@@ -130,13 +116,6 @@ class TaskExecution(BaseModel):
     status: TaskStatus = TaskStatus.RUNNING
     output: Optional[str] = None
     error: Optional[str] = None
-    
-    @validator("output", "error", pre=True)
-    def validate_ascii_output(cls, v):
-        """Ensure output and error fields contain only ASCII characters."""
-        if isinstance(v, str):
-            return sanitize_ascii(v)
-        return v
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the execution to a dictionary for serialization."""

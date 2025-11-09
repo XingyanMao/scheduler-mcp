@@ -36,9 +36,6 @@ The scheduler uses cron expressions for flexible timing and provides a complete 
 ### Installing uv (recommended)
 
 ```bash
-# For Mac/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
 # For Windows (PowerShell)
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
@@ -53,9 +50,6 @@ git clone https://github.com/phialsbasement/mcp-scheduler.git
 cd mcp-scheduler
 
 # Create and activate a virtual environment with uv
-uv venv
-source .venv/bin/activate  # On Unix/MacOS
-# or
 .venv\Scripts\activate     # On Windows
 
 # Install dependencies with uv
@@ -73,8 +67,6 @@ cd mcp-scheduler
 
 # Create and activate a virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Unix/MacOS
-# or
 .venv\Scripts\activate     # On Windows
 
 # Install dependencies
@@ -179,17 +171,17 @@ The MCP Scheduler provides the following tools:
 
 ### Task Management
 
-- `list_tasks`: Get all scheduled tasks
-- `get_task`: Get details of a specific task
+-1 `list_tasks`: Get all scheduled tasks
+-1 `get_task`: Get details of a specific task task_aeaf7f0de29e
 - `add_command_task`: Add a new shell command task
 - `add_api_task`: Add a new API call task
 - `add_ai_task`: Add a new AI task
-- `add_reminder_task`: Add a new reminder task with desktop notification
-- `update_task`: Update an existing task
-- `remove_task`: Delete a task
-- `enable_task`: Enable a disabled task
-- `disable_task`: Disable an active task
-- `run_task_now`: Run a task immediately
+-1 `add_reminder_task`: Add a new reminder task with desktop notification
+-1 `update_task`: Update an existing task
+-1 `remove_task`: Delete a task
+-1 `enable_task`: Enable a disabled task
+-1 `disable_task`: Disable an active task task_aeaf7f0de29e
+-1 `run_task_now`: Run a task immediately
 
 ### Execution and Monitoring
 
@@ -331,7 +323,6 @@ http://localhost:8081/.well-known/mcp-schema.json
         "additionalProperties": false
       }
     }
-    // ... more tools ...
   ]
 }
 ```
@@ -356,24 +347,3 @@ mcp inspect --stdio -- python main.py
 # Or with a simple MCP client
 python -m mcp.client.stdio python main.py
 ```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Built on the [Model Context Protocol](https://modelcontextprotocol.io/)
-- Uses [croniter](https://github.com/kiorky/croniter) for cron parsing
-- Uses [OpenAI API](https://openai.com/blog/openai-api) for AI tasks
-- Uses [FastMCP](https://github.com/jlowin/fastmcp) for enhanced MCP functionality

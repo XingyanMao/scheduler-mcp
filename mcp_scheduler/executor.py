@@ -1,6 +1,3 @@
-"""
-Task executor for MCP Scheduler.
-"""
 import asyncio
 import logging
 import shlex
@@ -9,28 +6,93 @@ import platform
 import os
 from datetime import datetime
 import aiohttp
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
-import openai
+from openai import OpenAI
 
 from .task import Task, TaskExecution, TaskStatus, TaskType
 
 logger = logging.getLogger(__name__)
 
-
 class Executor:
     """Task executor for running scheduled tasks."""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
-        """Initialize the task executor."""
-        self.api_key = api_key
-        self.ai_model = model
-        self.execution_timeout = 300  # 5 minutes default timeout
+    def __init__(self, config):
+        """Initialize the task executor with configuration."""
+        self.config = config
+        self.execution_timeout = config.execution_timeout
         self.is_windows = platform.system() == "Windows"
+        self.ai_client = None
         
-        if api_key:
-            openai.api_key = api_key
+        self._init_ai_client()
     
+    def _init_ai_client(self):
+        """Initialize AI client based on configuration."""
+        ai_config = self.config.get_ai_config()
+
+        # 调试信息
+        logger.info(f"AI Provider: {self.config.ai_provider}")
+        logger.info(f"AI Model: {self.config.ai_model}")
+        logger.info(f"Base URL: {ai_config.get('base_url')}")
+        logger.info(f"API Key present: {bool(ai_config.get('api_key'))}")
+        logger.info(f"Full AI config: {ai_config}")
+        
+        if not ai_config.get("api_key"):
+            logger.warning("No API key configured for AI tasks")
+            return
+        
+        try:
+            if self.config.ai_provider in ["openai", "local"]:
+                self.ai_client = OpenAI(
+                    api_key=ai_config["api_key"],
+                    base_url=ai_config.get("base_url"),
+                    organization=ai_config.get("organization")
+                )
+                logger.info(f"Initialized {self.config.ai_provider} client with model: {self.config.ai_model}")
+                
+            elif self.config.ai_provider == "azure":
+                from openai import AzureOpenAI
+                self.ai_client = AzureOpenAI(
+                    api_key=ai_config["api_key"],
+                    api_version=ai_config["api_version"],
+                    azure_endpoint=ai_config["base_url"].replace(f"/openai/deployments/{self.config.ai_model}", "")
+                )
+                logger.info(f"Initialized Azure OpenAI client with model: {self.config.ai_model}")
+                
+            elif self.config.ai_provider == "anthropic":
+                self.ai_client = OpenAI(
+                    api_key=ai_config["api_key"],
+                    base_url=ai_config["base_url"]
+                )
+                logger.info(f"Initialized Anthropic client with model: {self.config.ai_model}")
+            
+            # 测试API连接
+            if self.ai_client:
+                self._test_ai_connection()
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize AI client: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    def _test_ai_connection(self):
+        """Test AI API connection."""
+        try:
+            logger.info("Testing AI API connection...")
+            # 简单的测试请求
+            test_response = self.ai_client.chat.completions.create(
+                model=self.config.ai_model,
+                messages=[{"role": "user", "content": "Say 'test successful'"}],
+                max_tokens=10
+            )
+            logger.info("AI API connection test successful")
+            return True
+        except Exception as e:
+            logger.error(f"AI API connection test failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
+        
     async def execute_task(self, task: Task) -> TaskExecution:
         """Execute a task based on its type."""
         logger.info(f"Executing task: {task.id} ({task.name})")
@@ -203,29 +265,65 @@ class Executor:
             return None, f"API call timed out after {self.execution_timeout} seconds"
     
     async def _execute_ai_task(self, prompt: str) -> Tuple[Optional[str], Optional[str]]:
-        """Execute an AI task using OpenAI."""
+        """Execute an AI task using configured provider."""
         if not prompt:
             return None, "No prompt specified"
         
-        if not self.api_key:
-            return None, "No API key configured for AI tasks"
+        # 详细的调试信息
+        logger.info(f"=== AI Task Execution Debug ===")
+        logger.info(f"AI Client: {self.ai_client}")
+        logger.info(f"AI Client type: {type(self.ai_client)}")
+        logger.info(f"Prompt: {prompt}")
+        
+        if not self.ai_client:
+            logger.error("No AI client configured for AI tasks")
+            return None, "No AI client configured for AI tasks"
         
         try:
-            completion = await asyncio.to_thread(
-                openai.chat.completions.create,
-                model=self.ai_model,
-                messages=[
+            ai_config = self.config.get_ai_config()
+            
+            logger.info(f"Using AI provider: {self.config.ai_provider}, model: {self.config.ai_model}")
+            
+            # 准备请求参数
+            request_params = {
+                "model": self.config.ai_model,
+                "messages": [
                     {"role": "system", "content": "You are a helpful assistant executing scheduled tasks."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=2000
-            )
+                "max_tokens": ai_config.get("max_tokens", 2000),
+                "temperature": ai_config.get("temperature", 0.7)
+            }
             
-            return completion.choices[0].message.content, None
+            logger.info(f"Request parameters: {request_params}")
+            
+            # 测试API连接
+            logger.info("Making API call to DeepSeek...")
+            
+            # 添加超时控制
+            try:
+                completion = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.ai_client.chat.completions.create,
+                        **request_params
+                    ),
+                    timeout=30.0  # 30秒超时
+                )
+                
+                response = completion.choices[0].message.content
+                logger.info(f"AI response received: {response}")
+                return response, None
+                
+            except asyncio.TimeoutError:
+                logger.error("AI API call timed out after 30 seconds")
+                return None, "AI API call timed out"
             
         except Exception as e:
+            logger.error(f"AI task failed: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None, f"AI task failed: {str(e)}"
-    
+
     async def _execute_reminder_task(self, title: str, message: str) -> Tuple[Optional[str], Optional[str]]:
         """Execute a reminder task that displays a desktop notification with sound."""
         if not message:

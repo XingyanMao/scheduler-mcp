@@ -102,7 +102,6 @@ class SchedulerServer:
         # Create MCP server with custom response formatting
         self.mcp = CustomFastMCP(
             config.server_name,
-            version=config.server_version,
             dependencies=[
                 "croniter",
                 "pydantic",
